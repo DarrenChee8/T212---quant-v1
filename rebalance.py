@@ -13,6 +13,8 @@ Safety rules built in:
 - Trades smaller than MIN_TRADE_PCT of the account are skipped (a no-trade
   band, which also cuts turnover).
 - Orders are never retried automatically.
+- Before each buy, the quantity is capped to the cash still free, because
+  Trading 212 reserves extra cash (about 5%) against pending market buys.
 
 The account follows the index: target weights are the ones the index set at
 the last completed month end, not weights recalculated from today's prices.
@@ -44,6 +46,7 @@ CASH_BUFFER = 0.02     # keep 2% of the account in cash
 MIN_TRADE_PCT = 0.01   # skip trades smaller than 1% of the account
 QTY_DECIMALS = 2
 PAUSE_SECONDS = 2      # gap between orders, to respect rate limits
+RESERVE_MARGIN = 0.07  # Trading 212 reserves about 5% extra on pending market buys
 
 
 def prices_in_pounds(prices: pd.DataFrame) -> pd.Series:
@@ -151,11 +154,21 @@ def main():
 
     log = []
     for yahoo, row in trades.iterrows():
+        qty = float(row["trade_qty"])
         try:
-            order = client.place_market_order(row["t212_ticker"], float(row["trade_qty"]),
-                                              dry_run=False)
+            if qty > 0:  # a buy: never ask for more than the cash still free
+                free = float(client.get_cash()["free"])
+                affordable = int(free / (row["price_gbp"] * (1 + RESERVE_MARGIN)) * 100) / 100
+                if affordable < qty:
+                    print(f"  {row['t212_ticker']}: free cash £{free:,.2f} covers "
+                          f"{affordable:.2f} of {qty:.2f} shares; buying {affordable:.2f}")
+                    qty = affordable
+                if qty <= 0:
+                    print(f"  {row['t212_ticker']}: no free cash left, skipped")
+                    continue
+            order = client.place_market_order(row["t212_ticker"], qty, dry_run=False)
             status, order_id = order.get("status"), order.get("id")
-            print(f"Sent {row['t212_ticker']} qty {row['trade_qty']:+.2f} -> {status}")
+            print(f"Sent {row['t212_ticker']} qty {qty:+.2f} -> {status}")
         except Exception as exc:  # stop at the first failure; never retry
             print(f"FAILED {row['t212_ticker']}: {exc}\nStopping. Check the account "
                   "before running again.")
@@ -163,7 +176,7 @@ def main():
                         "qty": row["trade_qty"], "status": f"FAILED: {exc}", "id": None})
             break
         log.append({"time": datetime.now(), "ticker": row["t212_ticker"],
-                    "qty": row["trade_qty"], "status": status, "id": order_id})
+                    "qty": qty, "status": status, "id": order_id})
         time.sleep(PAUSE_SECONDS)
 
     OUTPUT_DIR.mkdir(exist_ok=True)

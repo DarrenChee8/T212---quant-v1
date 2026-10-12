@@ -13,6 +13,10 @@ Safety rules built in:
 - Trades smaller than MIN_TRADE_PCT of the account are skipped (a no-trade
   band, which also cuts turnover).
 - Orders are never retried automatically.
+
+The account follows the index: target weights are the ones the index set at
+the last completed month end, not weights recalculated from today's prices.
+Run it once a month, on the first trading day after the month end.
 """
 
 import sys
@@ -23,6 +27,7 @@ import pandas as pd
 import yfinance as yf
 
 from qis_data import load_prices
+from qis_index import month_end_dates
 from run_trend_index import OUTPUT_DIR, UNIVERSE
 from run_trend_index_v2 import make_trend_rule
 from t212_client import T212Client
@@ -54,6 +59,19 @@ def prices_in_pounds(prices: pd.DataFrame) -> pd.Series:
         else:
             raise RuntimeError(f"{ticker} is quoted in {currency}, expected GBP or pence")
     return pd.Series(out)
+
+
+def index_weights(prices: pd.DataFrame):
+    """Weights the index set at the last COMPLETED month end.
+
+    The current month is still in progress, so its last available day is not
+    a month end. The rule only ever sees prices up to the signal date.
+    """
+    current_month = prices.index[-1].to_period("M")
+    ends = [d for d in month_end_dates(prices.index) if d.to_period("M") < current_month]
+    signal_date = ends[-1]
+    weights = make_trend_rule()(prices.loc[:signal_date])
+    return weights, signal_date
 
 
 def build_plan(weights, price_gbp, held_qty, account_value, free_cash) -> pd.DataFrame:
@@ -100,7 +118,7 @@ def main():
                  "or cancel them before rebalancing again.")
 
     prices = load_prices(UNIVERSE.keys(), refresh=True)
-    weights = make_trend_rule()(prices)
+    weights, signal_date = index_weights(prices)
     price_gbp = prices_in_pounds(prices)
 
     cash = client.get_cash()
@@ -110,7 +128,9 @@ def main():
 
     plan = build_plan(weights, price_gbp, held_qty, account_value, free_cash)
 
-    print(f"\nPrices as of {prices.index[-1].date()} | account value "
+    print(f"\nIndex weights set at month end {signal_date.date()} "
+          f"(prices for sizing as of {prices.index[-1].date()})")
+    print(f"Account value "
           f"£{account_value:,.2f} | free cash £{free_cash:,.2f}\n")
     shown = plan.copy()
     shown.insert(0, "asset", [UNIVERSE[t] for t in shown.index])

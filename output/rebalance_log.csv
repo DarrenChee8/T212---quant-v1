@@ -1,0 +1,6 @@
+time,ticker,qty,status,id
+2026-10-12 20:58:09.364317,SGLNl_EQ,8.43,NEW,56400750380.0
+2026-10-12 20:58:11.467565,VWRLl_EQ,9.98,NEW,56400750387.0
+2026-10-12 20:58:13.584668,INXGl_EQ,73.73,NEW,56400750394.0
+2026-10-12 20:58:15.700466,IGLTl_EQ,106.82,NEW,56400750401.0
+2026-10-12 20:58:17.815219,COMMl_EQ,141.85,"FAILED: POST /equity/orders/market -> 400: {""type"":""/api-errors/insufficient-free-for-stocks-buy"",""title"":""Error while placing the order"",""status"":400,""detail"":""Insufficient funds"",""traceId"":""d3590fb433d03de8990f09c8095523d5""}",
